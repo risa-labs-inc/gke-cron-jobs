@@ -1,0 +1,128 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nycbs-medical-pa-processing-job
+  namespace: risa-v1
+spec:
+  # Schedule: 10:10 AM IST = 4:40 AM UTC
+  schedule: "40 4 * * *"
+  
+  # Job history limits
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  
+  # Scheduling policies
+  startingDeadlineSeconds: 300  # 5 minutes grace period
+  concurrencyPolicy: Forbid     # Don't run concurrent jobs
+  
+  jobTemplate:
+    spec:
+      # Job timeout: 10 minutes
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccount: compute-engine-sa
+          serviceAccountName: compute-engine-sa
+          containers:
+          - name: nycbs-medical-pa-container
+            image: alpine/curl:8.4.0  # Public image with curl + tools
+            
+            command: ["/bin/sh"]
+            args:
+              - -c
+              - |
+                #!/bin/sh
+                
+                # Exit immediately if any command fails
+                set -e
+                
+                echo "Starting NYCBS Medical PA job for org HhwIHO4npKhrxyylkC33 at $(date)"
+                echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
+                
+                # Check required environment variables
+                if [ -z "$AUTH_USERNAME" ] || [ -z "$AUTH_PASSWORD" ]; then
+                  echo "Error: AUTH_USERNAME and AUTH_PASSWORD environment variables are required."
+                  exit 1
+                fi
+                
+                # --- Step 1: Get Authentication Token ---
+                echo "Requesting token from internal authentication service..."
+                
+                # Create authentication payload
+                AUTH_PAYLOAD=$(printf '{"username": "%s", "password": "%s"}' "$AUTH_USERNAME" "$AUTH_PASSWORD")
+                
+                # Call internal authentication service
+                echo "Auth URL: http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token"
+                
+                # Install jq if not available
+                if ! command -v jq > /dev/null 2>&1; then
+                  echo "Installing jq..."
+                  apk add --no-cache jq > /dev/null 2>&1
+                fi
+                
+                TOKEN=$(curl -s -X POST \
+                  -H "Content-Type: application/json" \
+                  -d "$AUTH_PAYLOAD" \
+                  "http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token" | jq -r .access_token)
+                
+                # Validate token
+                if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+                  echo "Error: Failed to retrieve authentication token from internal service"
+                  exit 1
+                fi
+                
+                echo "Successfully retrieved authentication token from internal service"
+                
+                # --- Step 2: Call Medical PA API ---
+                TARGET_URL="http://pa-order-creation.risa-v1.svc.cluster.local:80/pa-order-creation/v1/medical-pa/process-batch-medical-pa"
+                TARGET_BODY='{"org_id": "HhwIHO4npKhrxyylkC33"}'
+                
+                echo "Calling Medical PA API for org HhwIHO4npKhrxyylkC33: $TARGET_URL"
+                
+                # Make the API call with Bearer token
+                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST \
+                  -H "accept: application/json" \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -H "Content-Type: application/json" \
+                  -d "$TARGET_BODY" \
+                  "$TARGET_URL")
+                
+                # Parse HTTP status code
+                HTTP_STATUS=$(echo $RESPONSE | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+                RESPONSE_BODY=$(echo $RESPONSE | sed -e 's/HTTPSTATUS:.*//g')
+                
+                echo "API Response Status: $HTTP_STATUS"
+                
+                if [ "$HTTP_STATUS" -eq 200 ]; then
+                  echo "Successfully called Medical PA API for org HhwIHO4npKhrxyylkC33"
+                  echo "Response: $RESPONSE_BODY"
+                else
+                  echo "Error: API call failed with status $HTTP_STATUS"
+                  echo "Response: $RESPONSE_BODY"
+                  exit 1
+                fi
+                
+                echo "NYCBS Medical PA job for org HhwIHO4npKhrxyylkC33 completed successfully at $(date)"
+            
+            # Environment variables from Kubernetes Secret
+            env:
+            - name: AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: risa-auth-credentials
+                  key: USERNAME
+            - name: AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: risa-auth-credentials
+                  key: PASSWORD
+            
+            # Resource limits
+            resources:
+              limits:
+                memory: "128Mi"
+                cpu: "100m"
+              requests:
+                memory: "64Mi"
+                cpu: "50m"

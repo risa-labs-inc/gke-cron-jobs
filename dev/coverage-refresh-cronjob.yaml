@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: coverage-refresh-processing-job
+  namespace: risa-v1
+spec:
+  # Schedule: Every 5 minutes
+  schedule: "*/5 * * * *"
+  
+  # Job history limits
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  
+  # Scheduling policies
+  startingDeadlineSeconds: 300  # 5 minutes grace period
+  concurrencyPolicy: Forbid     # Don't run concurrent jobs
+  
+  jobTemplate:
+    spec:
+      # Job timeout: 5 minutes (coverage refresh is quick)
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccount: compute-engine-sa
+          serviceAccountName: compute-engine-sa
+          containers:
+          - name: coverage-refresh-container
+            image: alpine/curl:8.4.0  # Public image with curl + tools
+            
+            command: ["/bin/sh"]
+            args:
+              - -c
+              - |
+                #!/bin/sh
+                
+                # Exit immediately if any command fails
+                set -e
+                
+                echo "Starting coverage refresh job at $(date)"
+                echo "Using internal service: backend-service-service.one-risa.svc.cluster.local"
+                
+                # --- Call Coverage Refresh API ---
+                # This is a simple POST request with no authentication or body required
+                TARGET_URL="http://backend-service-service.one-risa.svc.cluster.local:80/backend-service/medical/coverage/refresh-coverage-of-all-orders"
+                
+                echo "Calling coverage refresh API: $TARGET_URL"
+                echo "Note: No authentication required for this endpoint"
+                
+                # Make the API call (no authentication required)
+                # Add timeout since coverage refresh can take a long time
+                echo "Calling API with 4 minute timeout..."
+                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 240 -X POST \
+                  -H "accept: application/json" \
+                  -H "Content-Type: application/json" \
+                  "$TARGET_URL")
+                
+                # Parse HTTP status code
+                HTTP_STATUS=$(echo $RESPONSE | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+                RESPONSE_BODY=$(echo $RESPONSE | sed -e 's/HTTPSTATUS:.*//g')
+                
+                echo "API Response Status: $HTTP_STATUS"
+                
+                if [ "$HTTP_STATUS" -eq 200 ]; then
+                  echo "Successfully called coverage refresh API"
+                  echo "Response: $RESPONSE_BODY"
+                else
+                  echo "Error: API call failed with status $HTTP_STATUS"
+                  echo "Response: $RESPONSE_BODY"
+                  exit 1
+                fi
+                
+                echo "Coverage refresh job completed successfully at $(date)"
+            
+            # Resource limits (lightweight job)
+            resources:
+              limits:
+                memory: "64Mi"
+                cpu: "50m"
+              requests:
+                memory: "32Mi"
+                cpu: "25m"
