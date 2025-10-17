@@ -1,0 +1,138 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ucbc-group-inbox
+  namespace: risa-v1
+spec:
+  # Schedule: 05 7 * * * = 7:05 AM IST = 1:35 AM UTC
+  schedule: "35 1 * * *"
+  
+  # Job history limits
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  
+  # Scheduling policies
+  startingDeadlineSeconds: 300  # 5 minutes grace period
+  concurrencyPolicy: Forbid     # Don't run concurrent jobs
+  
+  jobTemplate:
+    spec:
+      # Job timeout: 15 minutes (RPA scraping can take longer)
+      activeDeadlineSeconds: 900
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccount: ksa-gcp-service-account
+          serviceAccountName: ksa-gcp-service-account
+          containers:
+          - name: ucbc-group-inbox-container
+            image: alpine/curl:8.4.0  # Public image with curl + tools
+            
+            command: ["/bin/sh"]
+            args:
+              - -c
+              - |
+                #!/bin/sh
+                
+                # Exit immediately if any command fails
+                set -e
+                
+                echo "Starting UCBC group inbox scraping job at $(date)"
+                echo "Schedule: 7:05 AM IST (1:35 AM UTC) - replacing Cloud Scheduler"
+                echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
+                
+                # Check required environment variables
+                if [ -z "$AUTH_USERNAME" ] || [ -z "$AUTH_PASSWORD" ]; then
+                  echo "Error: AUTH_USERNAME and AUTH_PASSWORD environment variables are required."
+                  exit 1
+                fi
+                
+                # --- Step 1: Get Authentication Token ---
+                echo "Requesting token from internal authentication service..."
+                
+                # Create authentication payload
+                AUTH_PAYLOAD=$(printf '{"username": "%s", "password": "%s"}' "$AUTH_USERNAME" "$AUTH_PASSWORD")
+                
+                # Install jq if not available
+                if ! command -v jq > /dev/null 2>&1; then
+                  echo "Installing jq..."
+                  apk add --no-cache jq > /dev/null 2>&1
+                fi
+                
+                TOKEN=$(curl -s -X POST \
+                  -H "Content-Type: application/json" \
+                  -d "$AUTH_PAYLOAD" \
+                  "http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token" | jq -r .access_token)
+                
+                # Validate token
+                if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+                  echo "Error: Failed to retrieve authentication token from internal service"
+                  exit 1
+                fi
+                
+                echo "Successfully retrieved authentication token from http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token"
+                
+                # --- Step 2: Call RPA Service API (External Cloud Run) ---
+                # Original Cloud Scheduler config:
+                # URL: https://common-cron-job-function-939421517637.us-central1.run.app/
+                # Body: {
+                #   "body": {"org_id": "W14MolgUu7OYvX4CFQJn"},
+                #   "url": "https://cloudrun-rpa-service-939421517637.us-east1.run.app/rpa-service/v1/rpa/group-inbox"
+                # }
+                #
+                # Direct call to RPA service (using public Cloud Run URL):
+                TARGET_URL="https://cloudrun-rpa-service-939421517637.us-east1.run.app/rpa-service/v1/rpa/group-inbox"
+                TARGET_BODY='{"org_id": "W14MolgUu7OYvX4CFQJn"}'
+                
+                echo "Calling UCBC RPA group inbox API (External Cloud Run): $TARGET_URL"
+                echo "Organization: UCBC (W14MolgUu7OYvX4CFQJn)"
+                echo "Note: This replaces Cloud Scheduler job for group inbox scraping"
+                
+                # Make the API call with Bearer token (10 minute timeout for RPA operations)
+                echo "Calling RPA API with 10 minute timeout..."
+                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 600 -X POST \
+                  -H "accept: application/json" \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -H "Content-Type: application/json" \
+                  -H "User-Agent: Kubernetes-CronJob" \
+                  -d "$TARGET_BODY" \
+                  "$TARGET_URL")
+                
+                # Parse HTTP status code
+                HTTP_STATUS=$(echo $RESPONSE | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+                RESPONSE_BODY=$(echo $RESPONSE | sed -e 's/HTTPSTATUS:.*//g')
+                
+                echo "API Response Status: $HTTP_STATUS"
+                
+                if [ "$HTTP_STATUS" -eq 200 ]; then
+                  echo "Successfully called UCBC RPA group inbox API"
+                  echo "Response: $RESPONSE_BODY"
+                else
+                  echo "Error: RPA API call failed with status $HTTP_STATUS"
+                  echo "Response: $RESPONSE_BODY"
+                  exit 1
+                fi
+                
+                echo "UCBC group inbox scraping job completed successfully at $(date)"
+            
+            # Environment variables from Kubernetes Secret
+            env:
+            - name: AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: risa-auth-credentials
+                  key: USERNAME
+            - name: AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: risa-auth-credentials
+                  key: PASSWORD
+            
+            # Resource limits (RPA operations may need more resources)
+            resources:
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+              requests:
+                memory: "128Mi"
+                cpu: "100m"

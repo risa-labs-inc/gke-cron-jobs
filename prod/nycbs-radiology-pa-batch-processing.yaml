@@ -1,0 +1,138 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nycbs-radiology-pa-batch-processing
+  namespace: risa-v1
+spec:
+  # Schedule: 30 8 * * * = 8:30 AM IST = 3:00 AM UTC
+  schedule: "0 3 * * *"
+  
+  # Job history limits
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  
+  # Scheduling policies
+  startingDeadlineSeconds: 300  # 5 minutes grace period
+  concurrencyPolicy: Forbid     # Don't run concurrent jobs
+  
+  jobTemplate:
+    spec:
+      # Job timeout: 15 minutes (batch processing can take longer)
+      activeDeadlineSeconds: 900
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccount: ksa-gcp-service-account
+          serviceAccountName: ksa-gcp-service-account
+          containers:
+          - name: nycbs-radiology-pa-batch-processing-container
+            image: alpine/curl:8.4.0  # Public image with curl + tools
+            
+            command: ["/bin/sh"]
+            args:
+              - -c
+              - |
+                #!/bin/sh
+                
+                # Exit immediately if any command fails
+                set -e
+                
+                echo "Starting NYCBS Radiology PA batch processing job at $(date)"
+                echo "Schedule: 8:30 AM IST (3:00 AM UTC) - replacing Cloud Scheduler"
+                echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
+                
+                # Check required environment variables
+                if [ -z "$AUTH_USERNAME" ] || [ -z "$AUTH_PASSWORD" ]; then
+                  echo "Error: AUTH_USERNAME and AUTH_PASSWORD environment variables are required."
+                  exit 1
+                fi
+                
+                # --- Step 1: Get Authentication Token ---
+                echo "Requesting token from internal authentication service..."
+                
+                # Create authentication payload
+                AUTH_PAYLOAD=$(printf '{"username": "%s", "password": "%s"}' "$AUTH_USERNAME" "$AUTH_PASSWORD")
+                
+                # Install jq if not available
+                if ! command -v jq > /dev/null 2>&1; then
+                  echo "Installing jq..."
+                  apk add --no-cache jq > /dev/null 2>&1
+                fi
+                
+                TOKEN=$(curl -s -X POST \
+                  -H "Content-Type: application/json" \
+                  -d "$AUTH_PAYLOAD" \
+                  "http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token" | jq -r .access_token)
+                
+                # Validate token
+                if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+                  echo "Error: Failed to retrieve authentication token from internal service"
+                  exit 1
+                fi
+                
+                echo "Successfully retrieved authentication token from http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token"
+                
+                # --- Step 2: Call Medical PA Batch Processing API (Internal Service) ---
+                # Original Cloud Scheduler config:
+                # URL: https://common-cron-job-function-939421517637.us-central1.run.app/
+                # Body: {
+                #   "body": {"org_id": "Ju4lbyPPuN0w9FIZblZV"},
+                #   "url": "https://api.risalabs.ai/pa-order-creation/v1/medical-pa/process-batch-medical-pa"
+                # }
+                #
+                # Converting to internal service call:
+                TARGET_URL="http://pa-order-creation.risa-v1.svc.cluster.local:80/pa-order-creation/v1/medical-pa/process-batch-medical-pa"
+                TARGET_BODY='{"org_id": "Ju4lbyPPuN0w9FIZblZV"}'
+                
+                echo "Calling NYCBS Radiology PA batch processing API (Internal Service): $TARGET_URL"
+                echo "Organization: NYCBS Radiology (Ju4lbyPPuN0w9FIZblZV)"
+                echo "Note: This replaces Cloud Scheduler job for batch processing"
+                
+                # Make the API call with Bearer token (12 minute timeout for batch processing)
+                echo "Calling Medical PA batch processing API with 12 minute timeout..."
+                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 720 -X POST \
+                  -H "accept: application/json" \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -H "Content-Type: application/json" \
+                  -H "User-Agent: Kubernetes-CronJob" \
+                  -d "$TARGET_BODY" \
+                  "$TARGET_URL")
+                
+                # Parse HTTP status code
+                HTTP_STATUS=$(echo $RESPONSE | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+                RESPONSE_BODY=$(echo $RESPONSE | sed -e 's/HTTPSTATUS:.*//g')
+                
+                echo "API Response Status: $HTTP_STATUS"
+                
+                if [ "$HTTP_STATUS" -eq 200 ]; then
+                  echo "Successfully called NYCBS Radiology PA batch processing API"
+                  echo "Response: $RESPONSE_BODY"
+                else
+                  echo "Error: Medical PA batch processing API call failed with status $HTTP_STATUS"
+                  echo "Response: $RESPONSE_BODY"
+                  exit 1
+                fi
+                
+                echo "NYCBS Radiology PA batch processing job completed successfully at $(date)"
+            
+            # Environment variables from Kubernetes Secret
+            env:
+            - name: AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: risa-auth-credentials
+                  key: USERNAME
+            - name: AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: risa-auth-credentials
+                  key: PASSWORD
+            
+            # Resource limits (batch processing may need more resources)
+            resources:
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+              requests:
+                memory: "128Mi"
+                cpu: "100m"

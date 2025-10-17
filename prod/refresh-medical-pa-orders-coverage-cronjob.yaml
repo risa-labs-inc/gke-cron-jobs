@@ -1,0 +1,87 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: refresh-medical-pa-orders-coverage-job
+  namespace: risa-v1
+spec:
+  # Schedule: */5 * * * * = Every 5 minutes
+  schedule: "*/5 * * * *"
+  
+  # Job history limits
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  
+  # Scheduling policies
+  startingDeadlineSeconds: 300  # 5 minutes grace period
+  concurrencyPolicy: Forbid     # Don't run concurrent jobs
+  
+  jobTemplate:
+    spec:
+      # Job timeout: 4 minutes (should complete before next run)
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccount: ksa-gcp-service-account
+          serviceAccountName: ksa-gcp-service-account
+          containers:
+          - name: refresh-coverage-container
+            image: alpine/curl:8.4.0  # Public image with curl + tools
+            
+            command: ["/bin/sh"]
+            args:
+              - -c
+              - |
+                #!/bin/sh
+                
+                # Exit immediately if any command fails
+                set -e
+                
+                echo "Starting refresh medical PA orders coverage job at $(date)"
+                echo "Schedule: Every 5 minutes - replacing Cloud Scheduler"
+                echo "Target: ev-bv-service coverage refresh endpoint"
+                
+                # --- Call Coverage Refresh API ---
+                # Original Cloud Scheduler config:
+                # URL: https://api.risalabs.ai/ev-bv-service/v1/coverage/refresh-coverage-of-all-orders
+                # Method: POST
+                # No authentication required
+                # 
+                # Converting to internal service call:
+                TARGET_URL="http://ev-bv-service.risa-v1.svc.cluster.local:80/ev-bv-service/v1/coverage/refresh-coverage-of-all-orders"
+                
+                echo "Calling coverage refresh API: $TARGET_URL"
+                echo "Note: No authentication required for this endpoint"
+                
+                # Make the API call with 3 minute timeout (no authentication required)
+                echo "Calling API with 3 minute timeout..."
+                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 180 -X POST \
+                  -H "accept: application/json" \
+                  -H "Content-Type: application/json" \
+                  "$TARGET_URL")
+                
+                # Parse HTTP status code
+                HTTP_STATUS=$(echo $RESPONSE | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+                RESPONSE_BODY=$(echo $RESPONSE | sed -e 's/HTTPSTATUS:.*//g')
+                
+                echo "API Response Status: $HTTP_STATUS"
+                
+                if [ "$HTTP_STATUS" -eq 200 ]; then
+                  echo "Successfully called coverage refresh API"
+                  echo "Response: $RESPONSE_BODY"
+                else
+                  echo "Error: API call failed with status $HTTP_STATUS"
+                  echo "Response: $RESPONSE_BODY"
+                  exit 1
+                fi
+                
+                echo "Refresh medical PA orders coverage job completed successfully at $(date)"
+            
+            # Resource limits (lightweight job that runs frequently)
+            resources:
+              limits:
+                memory: "64Mi"
+                cpu: "50m"
+              requests:
+                memory: "32Mi"
+                cpu: "25m"
