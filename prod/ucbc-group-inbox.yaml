@@ -17,8 +17,8 @@ spec:
   
   jobTemplate:
     spec:
-      # Job timeout: 15 minutes (RPA scraping can take longer)
-      activeDeadlineSeconds: 900
+      # Job timeout: 60 minutes (RPA scraping can take longer)
+      activeDeadlineSeconds: 3600
       template:
         spec:
           restartPolicy: OnFailure
@@ -80,17 +80,17 @@ spec:
                 #   "url": "https://cloudrun-rpa-service-939421517637.us-east1.run.app/rpa-service/v1/rpa/group-inbox"
                 # }
                 #
-                # Direct call to RPA service (using public Cloud Run URL):
-                TARGET_URL="https://cloudrun-rpa-service-939421517637.us-east1.run.app/rpa-service/v1/rpa/group-inbox"
+                # Direct call to RPA service:
+                TARGET_URL="http://rpa-service.risa-v1.svc.cluster.local/rpa-service/v1/rpa/group-inbox"
                 TARGET_BODY='{"org_id": "W14MolgUu7OYvX4CFQJn"}'
                 
-                echo "Calling UCBC RPA group inbox API (External Cloud Run): $TARGET_URL"
+                echo "Calling UCBC RPA group inbox API: $TARGET_URL"
                 echo "Organization: UCBC (W14MolgUu7OYvX4CFQJn)"
                 echo "Note: This replaces Cloud Scheduler job for group inbox scraping"
                 
-                # Make the API call with Bearer token (10 minute timeout for RPA operations)
-                echo "Calling RPA API with 10 minute timeout..."
-                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 600 -X POST \
+                # Make the API call with Bearer token
+                echo "Calling RPA API with 55 minute timeout..."
+                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 3300 -X POST \
                   -H "accept: application/json" \
                   -H "Authorization: Bearer $TOKEN" \
                   -H "Content-Type: application/json" \

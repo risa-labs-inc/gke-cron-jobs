@@ -1,20 +1,20 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: marybird-slidell-group-inbox
+  name: chc-group-inbox
   namespace: risa-v1
 spec:
-  # Schedule: 35 5 * * * = 5:35 AM IST = 12:05 AM UTC
-  schedule: "5 0 * * *"
-  
+  # Schedule: 40 5 * * * = 5:40 AM IST = 12:10 AM UTC
+  schedule: "10 0 * * *"
+
   # Job history limits
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
-  
+
   # Scheduling policies
   startingDeadlineSeconds: 300  # 5 minutes grace period
   concurrencyPolicy: Forbid     # Don't run concurrent jobs
-  
+
   jobTemplate:
     spec:
       # Job timeout: 60 minutes (RPA scraping can take longer)
@@ -25,9 +25,9 @@ spec:
           serviceAccount: ksa-gcp-service-account
           serviceAccountName: ksa-gcp-service-account
           containers:
-          - name: marybird-slidell-group-inbox-container
+          - name: chc-group-inbox-container
             image: alpine/curl:8.4.0  # Public image with curl + tools
-            
+
             command: ["/bin/sh"]
             args:
               - -c
@@ -37,8 +37,8 @@ spec:
                 # Exit immediately if any command fails
                 set -e
                 
-                echo "Starting Marybird Slidell group inbox scraping job at $(date)"
-                echo "Schedule: 5:35 AM IST (12:05 AM UTC) - replacing Cloud Scheduler"
+                echo "Starting chc group inbox scraping job at $(date)"
+                echo "Schedule: 5:40 AM IST (12:10 AM UTC) - replacing Cloud Scheduler"
                 echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
                 
                 # Check required environment variables
@@ -72,22 +72,12 @@ spec:
                 
                 echo "Successfully retrieved authentication token from http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token"
                 
-                # --- Step 2: Call RPA Service API (External Cloud Run) ---
-                # Original Cloud Scheduler config:
-                # URL: https://common-cron-job-function-939421517637.us-central1.run.app/
-                # Body: {
-                #   "body": {"org_id": "3GKbZtgpPru1vJGCkxwR", "version": "6"},
-                #   "url": "https://cloudrun-rpa-service-939421517637.us-east1.run.app/rpa-service/v1/rpa/group-inbox"
-                # }
-                #
                 # Direct call to RPA service:
                 TARGET_URL="http://rpa-service.risa-v1.svc.cluster.local/rpa-service/v1/rpa/group-inbox"
-                TARGET_BODY='{"org_id": "3GKbZtgpPru1vJGCkxwR", "version": "6"}'
+                TARGET_BODY='{"org_id": "4BlQ4SsqAVTDgFKApKZr"}'
                 
-                echo "Calling Marybird Slidell RPA group inbox API: $TARGET_URL"
-                echo "Organization: Marybird Slidell (3GKbZtgpPru1vJGCkxwR)"
-                echo "Version: 6"
-                echo "Note: This replaces Cloud Scheduler job for group inbox scraping"
+                echo "Calling chc RPA group inbox API: $TARGET_URL"
+                echo "Organization: chc (4BlQ4SsqAVTDgFKApKZr)"
                 
                 # Make the API call with Bearer token
                 echo "Calling RPA API with 55 minute timeout..."
@@ -106,7 +96,7 @@ spec:
                 echo "API Response Status: $HTTP_STATUS"
                 
                 if [ "$HTTP_STATUS" -eq 200 ]; then
-                  echo "Successfully called Marybird Slidell RPA group inbox API"
+                  echo "Successfully called chc  RPA group inbox API"
                   echo "Response: $RESPONSE_BODY"
                 else
                   echo "Error: RPA API call failed with status $HTTP_STATUS"
@@ -114,8 +104,8 @@ spec:
                   exit 1
                 fi
                 
-                echo "Marybird Slidell group inbox scraping job completed successfully at $(date)"
-            
+                echo "chc group inbox scraping job completed successfully at $(date)"
+
             # Environment variables from Kubernetes Secret
             env:
             - name: AUTH_USERNAME
@@ -128,7 +118,7 @@ spec:
                 secretKeyRef:
                   name: risa-auth-credentials
                   key: PASSWORD
-            
+
             # Resource limits (RPA operations may need more resources)
             resources:
               limits:
