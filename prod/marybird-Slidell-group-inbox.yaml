@@ -4,8 +4,8 @@ metadata:
   name: marybird-slidell-group-inbox
   namespace: risa-v1
 spec:
-  # Schedule: 35 5 * * * = 5:35 AM IST = 12:05 AM UTC
-  schedule: "5 0 * * *"
+  # Schedule: 33 5 * * * = 5:33 AM IST = 12:03 AM UTC
+  schedule: "3 0 * * *"
   
   # Job history limits
   successfulJobsHistoryLimit: 3
@@ -38,7 +38,7 @@ spec:
                 set -e
                 
                 echo "Starting Marybird Slidell group inbox scraping job at $(date)"
-                echo "Schedule: 5:35 AM IST (12:05 AM UTC) - replacing Cloud Scheduler"
+                echo "Schedule: 5:33 AM IST (12:03 AM UTC) - replacing Cloud Scheduler"
                 echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
                 
                 # Check required environment variables

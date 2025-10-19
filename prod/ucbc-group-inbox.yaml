@@ -4,8 +4,8 @@ metadata:
   name: ucbc-group-inbox
   namespace: risa-v1
 spec:
-  # Schedule: 05 7 * * * = 7:05 AM IST = 1:35 AM UTC
-  schedule: "35 1 * * *"
+  # Schedule: 40 5 * * * = 5:40 AM IST = 12:10 AM UTC
+  schedule: "10 0 * * *"
   
   # Job history limits
   successfulJobsHistoryLimit: 3
@@ -38,7 +38,7 @@ spec:
                 set -e
                 
                 echo "Starting UCBC group inbox scraping job at $(date)"
-                echo "Schedule: 7:05 AM IST (1:35 AM UTC) - replacing Cloud Scheduler"
+                echo "Schedule: 5:40 AM IST (12:10 AM UTC) - replacing Cloud Scheduler"
                 echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
                 
                 # Check required environment variables

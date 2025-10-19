@@ -4,8 +4,8 @@ metadata:
   name: marybird-essen-group-inbox
   namespace: risa-v1
 spec:
-  # Schedule: 50 5 * * * = 5:50 AM IST = 12:20 AM UTC
-  schedule: "20 0 * * *"
+  # Schedule: 37 5 * * * = 5:37 AM IST = 12:07 AM UTC
+  schedule: "7 0 * * *"
   
   # Job history limits
   successfulJobsHistoryLimit: 3
@@ -38,7 +38,7 @@ spec:
                 set -e
                 
                 echo "Starting Marybird Essen group inbox scraping job at $(date)"
-                echo "Schedule: 5:50 AM IST (12:20 AM UTC) - replacing Cloud Scheduler"
+                echo "Schedule: 5:37 AM IST (12:07 AM UTC) - replacing Cloud Scheduler"
                 echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
                 
                 # Check required environment variables
