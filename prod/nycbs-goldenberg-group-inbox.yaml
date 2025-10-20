@@ -1,11 +1,11 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: nycbs-pharma-batch-processing
+  name: nycbs-goldenberg-group-inbox
   namespace: risa-v1
 spec:
-  # Schedule: 30 5 * * * = 5:30 AM IST = 12:00 AM UTC
-  schedule: "0 0 * * *"
+  # Schedule: 41 5 * * * = 5:41 AM IST = 12:11 AM UTC
+  schedule: "11 0 * * *"
 
   # Job history limits
   successfulJobsHistoryLimit: 3
@@ -17,15 +17,15 @@ spec:
 
   jobTemplate:
     spec:
-      # Job timeout: 15 minutes (batch processing can take longer)
-      activeDeadlineSeconds: 900
+      # Job timeout: 60 minutes (RPA scraping can take longer)
+      activeDeadlineSeconds: 3600
       template:
         spec:
-          restartPolicy: Never
+          restartPolicy: OnFailure
           serviceAccount: ksa-gcp-service-account
           serviceAccountName: ksa-gcp-service-account
           containers:
-          - name: nycbs-pharma-batch-processing-container
+          - name: nycbs-goldenberg-group-inbox-container
             image: alpine/curl:8.4.0  # Public image with curl + tools
 
             command: ["/bin/sh"]
@@ -37,8 +37,8 @@ spec:
                 # Exit immediately if any command fails
                 set -e
                 
-                echo "Starting NYCBS Pharma Batch processing job at $(date)"
-                echo "Schedule: 5:30 AM IST (12:00 AM UTC)"
+                echo "Starting NYCBS Goldenberg group inbox scraping job at $(date)"
+                echo "Schedule: 5:41 AM IST (12:11 AM UTC) - replacing Cloud Scheduler"
                 echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
                 
                 # Check required environment variables
@@ -72,16 +72,16 @@ spec:
                 
                 echo "Successfully retrieved authentication token from http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token"
                 
-                # Direct call to RPA service:
-                TARGET_URL="http://pa-order-creation.risa-v1.svc.cluster.local/pa-order-creation/v1/nycbs/initiate-nycbs-pa-cron-job"
-                TARGET_BODY='{"org_id": "hwKXreFwPrMpA8Pad7Mr", "infrastructure": "gke"}'
+                # --- Step 2: Call RPA Service API (External Cloud Run) ---
+                TARGET_URL="http://rpa-service.risa-v1.svc.cluster.local/rpa-service/v1/rpa/group-inbox"
+                TARGET_BODY='{"org_id": "Y15ePfa5kC35QiChxXil", "version": "7"}'
                 
-                echo "Calling NYCBS Pharma Batch Processing API: $TARGET_URL"
-                echo "Organization: NYCBS Pharma (hwKXreFwPrMpA8Pad7Mr)"
+                echo "Calling NYCBS RPA group inbox API: $TARGET_URL"
+                echo "Organization: NYCBS Hyderabad Group (Y15ePfa5kC35QiChxXil)"
                 
                 # Make the API call with Bearer token
-                echo "Calling PA Batch Processing API with 12 minute timeout..."
-                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 720 -X POST \
+                echo "Calling RPA API with 55 minute timeout..."
+                RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 3300 -X POST \
                   -H "accept: application/json" \
                   -H "Authorization: Bearer $TOKEN" \
                   -H "Content-Type: application/json" \
@@ -96,7 +96,7 @@ spec:
                 echo "API Response Status: $HTTP_STATUS"
                 
                 if [ "$HTTP_STATUS" -eq 200 ]; then
-                  echo "Successfully called NYCBS Pharma Batch Processing API"
+                  echo "Successfully called NYCBS Goldenberg RPA group inbox API"
                   echo "Response: $RESPONSE_BODY"
                 else
                   echo "Error: RPA API call failed with status $HTTP_STATUS"
@@ -104,7 +104,7 @@ spec:
                   exit 1
                 fi
                 
-                echo "NYCBS Pharma Batch Processing job completed successfully at $(date)"
+                echo "NYCBS Goldenberg group inbox scraping job completed successfully at $(date)"
 
             # Environment variables from Kubernetes Secret
             env:

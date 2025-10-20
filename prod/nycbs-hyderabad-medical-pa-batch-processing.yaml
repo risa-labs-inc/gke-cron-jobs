@@ -1,33 +1,33 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: nycbs-pharma-batch-processing
+  name: nycbs-hyderabad-medical-pa-batch-processing
   namespace: risa-v1
 spec:
-  # Schedule: 30 5 * * * = 5:30 AM IST = 12:00 AM UTC
-  schedule: "0 0 * * *"
-
+  # Schedule: 05 6 * * * = 6:05 AM IST = 12:35 AM UTC
+  schedule: "00 1 * * *"
+  
   # Job history limits
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
-
+  
   # Scheduling policies
   startingDeadlineSeconds: 300  # 5 minutes grace period
   concurrencyPolicy: Forbid     # Don't run concurrent jobs
-
+  
   jobTemplate:
     spec:
       # Job timeout: 15 minutes (batch processing can take longer)
       activeDeadlineSeconds: 900
       template:
         spec:
-          restartPolicy: Never
+          restartPolicy: OnFailure
           serviceAccount: ksa-gcp-service-account
           serviceAccountName: ksa-gcp-service-account
           containers:
-          - name: nycbs-pharma-batch-processing-container
+          - name: nycbs-hyderabad-medical-pa-batch-processing-container
             image: alpine/curl:8.4.0  # Public image with curl + tools
-
+            
             command: ["/bin/sh"]
             args:
               - -c
@@ -37,8 +37,8 @@ spec:
                 # Exit immediately if any command fails
                 set -e
                 
-                echo "Starting NYCBS Pharma Batch processing job at $(date)"
-                echo "Schedule: 5:30 AM IST (12:00 AM UTC)"
+                echo "Starting NYCBS Medical PA batch processing job at $(date)"
+                echo "Schedule: 7:00 AM IST (12:35 AM UTC) - replacing Cloud Scheduler"
                 echo "Using internal auth service: auth-service-service.risa-v1.svc.cluster.local"
                 
                 # Check required environment variables
@@ -72,15 +72,23 @@ spec:
                 
                 echo "Successfully retrieved authentication token from http://auth-service-service.risa-v1.svc.cluster.local/api/v1/user-auth/token"
                 
-                # Direct call to RPA service:
-                TARGET_URL="http://pa-order-creation.risa-v1.svc.cluster.local/pa-order-creation/v1/nycbs/initiate-nycbs-pa-cron-job"
-                TARGET_BODY='{"org_id": "hwKXreFwPrMpA8Pad7Mr", "infrastructure": "gke"}'
+                # --- Step 2: Call Medical PA Batch Processing API (Internal Service) ---
+                # Original Cloud Scheduler config:
+                # URL: https://common-cron-job-function-939421517637.us-central1.run.app/
+                # Body: {
+                #   "body": {"org_id": "Y15ePfa5kC35QiChxXil"},
+                #   "url": "https://api.risalabs.ai/pa-order-creation/v1/medical-pa/process-batch-medical-pa"
+                # }
+                #
+                # Converting to internal service call:
+                TARGET_URL="http://pa-order-creation.risa-v1.svc.cluster.local:80/pa-order-creation/v1/medical-pa/process-batch-medical-pa"
+                TARGET_BODY='{"org_id": "Y15ePfa5kC35QiChxXil"}'
                 
-                echo "Calling NYCBS Pharma Batch Processing API: $TARGET_URL"
-                echo "Organization: NYCBS Pharma (hwKXreFwPrMpA8Pad7Mr)"
+                echo "Calling NYCBS Medical PA batch processing API (Internal Service): $TARGET_URL"
+                echo "Organization: NYCBS Hyderabad Group (Y15ePfa5kC35QiChxXil)"
                 
-                # Make the API call with Bearer token
-                echo "Calling PA Batch Processing API with 12 minute timeout..."
+                # Make the API call with Bearer token (12 minute timeout for batch processing)
+                echo "Calling Medical PA batch processing API with 12 minute timeout..."
                 RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" --max-time 720 -X POST \
                   -H "accept: application/json" \
                   -H "Authorization: Bearer $TOKEN" \
@@ -96,16 +104,16 @@ spec:
                 echo "API Response Status: $HTTP_STATUS"
                 
                 if [ "$HTTP_STATUS" -eq 200 ]; then
-                  echo "Successfully called NYCBS Pharma Batch Processing API"
+                  echo "Successfully called NYCBS Hyderabad Medical PA batch processing API"
                   echo "Response: $RESPONSE_BODY"
                 else
-                  echo "Error: RPA API call failed with status $HTTP_STATUS"
+                  echo "Error: Medical PA batch processing API call failed with status $HTTP_STATUS"
                   echo "Response: $RESPONSE_BODY"
                   exit 1
                 fi
                 
-                echo "NYCBS Pharma Batch Processing job completed successfully at $(date)"
-
+                echo "NYCBS Hyderabad Medical PA batch processing job completed successfully at $(date)"
+            
             # Environment variables from Kubernetes Secret
             env:
             - name: AUTH_USERNAME
@@ -118,8 +126,8 @@ spec:
                 secretKeyRef:
                   name: risa-auth-credentials
                   key: PASSWORD
-
-            # Resource limits (RPA operations may need more resources)
+            
+            # Resource limits (batch processing may need more resources)
             resources:
               limits:
                 memory: "256Mi"
